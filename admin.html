@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LittleLand 房間管理系統</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+<style>
+  body { font-family: 'Nunito', 'Noto Sans TC', sans-serif; background: #f8fafc; }
+</style>
+</head>
+<body x-data="adminApp()">
+<div class="max-w-7xl mx-auto p-4">
+  <header class="mb-6 flex items-center gap-4">
+    <img src="littleland-logo.png" alt="LittleLand" class="h-14" onerror="this.style.display='none'">
+    <div>
+      <h1 class="text-2xl font-bold text-indigo-700">LittleLand 房間管理系統</h1>
+      <p class="text-sm text-gray-500">後台管理｜空房｜預訂｜營收｜一鍵訊息</p>
+    </div>
+  </header>
+
+  <nav class="flex flex-wrap gap-2 mb-6">
+    <template x-for="t in ['概覽','房間月曆','預訂列表','新增預訂','營收']" :key="t">
+      <button @click="tab=t" :class="tab===t?'bg-indigo-600 text-white':'bg-white'" class="px-4 py-2 rounded-lg shadow-sm font-medium" x-text="t"></button>
+    </template>
+  </nav>
+
+  <!-- 概覽 -->
+  <div x-show="tab==='概覽'" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">總訂單</div><div class="text-2xl font-bold" x-text="bookings.length"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">已入住</div><div class="text-2xl font-bold text-green-600" x-text="countStatus('已入住')"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">待付訂金</div><div class="text-2xl font-bold text-orange-600" x-text="countStatus('已確認')"></div></div>
+    <div class="bg-white p-4 rounded-lg shadow"><div class="text-sm text-gray-500">本月營收</div><div class="text-2xl font-bold" x-text="'HK$'+revenueThisMonth"></div></div>
+  </div>
+
+  <!-- 房間月曆 -->
+  <div x-show="tab==='房間月曆'" class="bg-white p-4 rounded-lg shadow">
+    <div class="flex items-center justify-between mb-4">
+      <button @click="prevMonth()" class="px-3 py-1 bg-gray-200 rounded">◀ 上月</button>
+      <h2 class="text-xl font-semibold" x-text="monthLabel"></h2>
+      <button @click="nextMonth()" class="px-3 py-1 bg-gray-200 rounded">下月 ▶</button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm border-collapse">
+        <thead><tr class="bg-gray-100">
+          <th class="border p-2 sticky left-0 bg-gray-100 min-w-24">房間</th>
+          <template x-for="d in monthDays" :key="d.date">
+            <th class="border p-2 text-center min-w-20" :class="d.isToday?'bg-yellow-100 font-bold':''" x-text="d.day"></th>
+          </template>
+        </tr></thead>
+        <tbody>
+          <template x-for="room in allRooms" :key="room">
+            <tr>
+              <td class="border p-2 font-medium sticky left-0 bg-white" x-text="roomLabel(room)"></td>
+              <template x-for="d in monthDays" :key="d.date">
+                <td class="border p-2 text-center align-top min-h-16" 
+                    :class="cellClass(room, d.date)"
+                    :title="getOccupant(room, d.date)">
+                  <template x-if="getStatus(room, d.date)==='入住中'">
+                    <div class="text-xs text-red-700 leading-tight font-medium">
+                      <div x-text="getOccupantShort(room, d.date)"></div>
+                      <div class="text-[10px]">入住中</div>
+                    </div>
+                  </template>
+                  <template x-if="getStatus(room, d.date)==='保留中'">
+                    <div class="text-xs text-orange-700 leading-tight font-medium">
+                      <div x-text="getOccupantShort(room, d.date)"></div>
+                      <div class="text-[10px]">保留中</div>
+                    </div>
+                  </template>
+                  <span x-show="getStatus(room, d.date)==='空房'" class="text-green-600 text-lg">○</span>
+                </td>
+              </template>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-gray-500 mt-3">
+      <span class="inline-block w-3 h-3 bg-green-200 mr-1"></span> 空房　
+      <span class="inline-block w-3 h-3 bg-orange-200 mr-1"></span> 保留中（已確認／已付訂金）　
+      <span class="inline-block w-3 h-3 bg-red-200 mr-1"></span> 入住中<br>
+      非常.豪華套房 (SR1) 佔用 S1+S2+S3｜豪華套房 (SS1) 佔用 S1+S2
+    </p>
+  </div>
+
+  <!-- 預訂列表 -->
+  <div x-show="tab==='預訂列表'" class="bg-white p-4 rounded-lg shadow">
+    <div class="flex gap-2 mb-4">
+      <input x-model="search" placeholder="搜尋客人／寵物" class="border px-3 py-2 rounded flex-1">
+      <button @click="exportCSV()" class="bg-green-600 text-white px-4 py-2 rounded">匯出 CSV</button>
+    </div>
+    <div class="overflow-x-auto text-sm">
+      <table class="min-w-full">
+        <thead class="bg-gray-100"><tr>
+          <th class="p-2 text-left">客人</th><th class="p-2">寵物</th><th class="p-2">房型</th><th class="p-2">狀態</th><th class="p-2">入住／退房</th><th class="p-2">提醒</th><th class="p-2">總價</th><th class="p-2">操作</th>
+        </tr></thead>
+        <tbody>
+          <template x-for="b in filtered" :key="b.id">
+            <tr class="border-t hover:bg-gray-50">
+              <td class="p-2" x-text="b.guest"></td>
+              <td class="p-2" x-text="(b.petType==='兔子'?'🐰':b.petType==='天竺鼠'?'🐷':'🐹') + b.pet"></td>
+              <td class="p-2" x-text="b.product"></td>
+              <td class="p-2"><span class="px-2 py-0.5 rounded text-xs" :class="statusColor(b.status)" x-text="b.status"></span></td>
+              <td class="p-2 text-xs" x-text="(b.checkin||'') + ' ' + (b.checkinTime||'') + ' → ' + (b.checkout||'') + ' ' + (b.checkoutTime||'')"></td>
+              <td class="p-2 text-xs">
+                <span x-show="needsReminder(b)" class="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded">需跟進</span>
+              </td>
+              <td class="p-2 font-medium" x-text="'HK$'+b.total"></td>
+              <td class="p-2 space-y-1">
+                <button x-show="canTransition(b.status,'已入住')" @click="setStatus(b,'已入住')" class="block w-full text-xs bg-green-600 text-white px-2 py-1 rounded">確定入住</button>
+                <button x-show="['已付訂金','已入住'].includes(b.status)" @click="extend(b)" class="block w-full text-xs bg-blue-600 text-white px-2 py-1 rounded">延期</button>
+                <button @click="viewDetail(b)" class="block w-full text-xs bg-gray-600 text-white px-2 py-1 rounded">查看詳細／列印 PDF</button>
+                <button @click="generateConfirmMsg(b)" class="block w-full text-xs bg-purple-600 text-white px-2 py-1 rounded">生成確認付款訊息</button>
+                <button @click="generateReminderMsg(b)" class="block w-full text-xs bg-orange-500 text-white px-2 py-1 rounded">生成入住前提醒</button>
+                <select @change="setStatus(b,$event.target.value);$event.target.value=''" class="text-xs border rounded px-1 w-full mt-1">
+                  <option value="">改狀態</option>
+                  <template x-for="s in nextStatuses(b.status)" :key="s"><option :value="s" x-text="s"></option></template>
+                </select>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 新增預訂 -->
+  <div x-show="tab==='新增預訂'" class="bg-white p-6 rounded-lg shadow max-w-2xl">
+    <h2 class="font-semibold mb-4">手動新增預訂</h2>
+    <form @submit.prevent="addBooking()" class="space-y-3 text-sm">
+      <div class="grid grid-cols-2 gap-3">
+        <input x-model="n.guest" placeholder="客人姓名" required class="border px-3 py-2 rounded">
+        <input x-model="n.pet" placeholder="寵物名稱" required class="border px-3 py-2 rounded">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <select x-model="n.petType" class="border px-3 py-2 rounded">
+          <option value="兔子">兔子</option><option value="天竺鼠">天竺鼠</option><option value="倉鼠">倉鼠</option>
+        </select>
+        <select x-model="n.product" required class="border px-3 py-2 rounded">
+          <option value="">選擇房型</option>
+          <template x-for="p in products" :key="p.name"><option :value="p.name" x-text="p.name+' $'+p.price"></option></template>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <input type="date" x-model="n.checkin" required class="border px-3 py-2 rounded">
+        <input type="date" x-model="n.checkout" required class="border px-3 py-2 rounded">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <select x-model.number="n.qty" class="border px-3 py-2 rounded">
+          <option value="1">1隻</option><option value="2">2隻</option><option value="3">3隻</option>
+        </select>
+        <div class="text-sm text-gray-500 self-center">總價會自動計算（含週末附加費）</div>
+      </div>
+      <input x-model="n.food" placeholder="主糧" class="border px-3 py-2 rounded w-full">
+      <input x-model="n.hay" placeholder="牧草" class="border px-3 py-2 rounded w-full">
+      <textarea x-model="n.special" placeholder="特別要求" class="border px-3 py-2 rounded w-full" rows="2"></textarea>
+      <button class="w-full bg-indigo-600 text-white py-2 rounded">儲存（狀態：待確認）</button>
+    </form>
+  </div>
+
+  <!-- 營收 -->
+  <div x-show="tab==='營收'" class="bg-white p-4 rounded-lg shadow">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="bg-green-50 p-4 rounded"><div class="text-sm">總營收</div><div class="text-2xl font-bold" x-text="'HK$'+totalRev"></div></div>
+      <div class="bg-blue-50 p-4 rounded"><div class="text-sm">本月</div><div class="text-2xl font-bold" x-text="'HK$'+revenueThisMonth"></div></div>
+      <div class="bg-purple-50 p-4 rounded"><div class="text-sm">平均</div><div class="text-2xl font-bold" x-text="'HK$'+avgRev"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PRODUCTS = [
+  {name:'獨立套房', code:'S', rooms:['S1'], price:278, max:2},
+  {name:'豪華套房', code:'SS1', rooms:['S1','S2'], price:350, max:3},
+  {name:'非常.豪華套房', code:'SR1', rooms:['S1','S2','S3'], price:600, max:3},
+  {name:'豪華房', code:'A', rooms:['A1'], price:178, max:1},
+  {name:'標準房', code:'B', rooms:['B1'], price:98, max:1},
+  {name:'整理箱', code:'F', rooms:['F1'], price:65, max:1},
+  {name:'自備籠', code:'自備', rooms:['自備籠'], price:50, max:1}
+];
+
+const TRANSITIONS = {
+  '待確認':['已確認','取消','取消退訂金','取消退全數'],
+  '已確認':['已付訂金','取消','取消退訂金','取消退全數'],
+  '已付訂金':['已入住','取消','取消退訂金','取消退全數','提早退房'],
+  '已入住':['已退房','提早退房'],
+  '已退房':['已完成'],
+  '提早退房':['已完成'],
+  '取消':[],'取消退訂金':[],'取消退全數':[],'已完成':[]
+};
+
+function adminApp() {
+  return {
+    tab:'概覽',
+    products:PRODUCTS,
+    bookings: JSON.parse(localStorage.getItem('littlelandAdmin')||'[]'),
+    search:'',
+    currentYear: new Date().getFullYear(),
+    currentMonth: new Date().getMonth(),
+    allRooms:['S1','S2','S3','A1','A2','A3','B1','B2','F1','自備籠'],
+    n:{guest:'',pet:'',petType:'兔子',product:'',qty:1,checkin:'',checkout:'',food:'',hay:'',special:'',extras:[]},
+
+    init(){ this.$watch('bookings', v => localStorage.setItem('littlelandAdmin', JSON.stringify(v))); },
+
+    get filtered(){
+      const q=this.search.toLowerCase();
+      return this.bookings.filter(b=>!q||(b.guest||'').toLowerCase().includes(q)||(b.pet||'').toLowerCase().includes(q));
+    },
+    countStatus(s){ return this.bookings.filter(b=>b.status===s).length; },
+    get totalRev(){ return this.bookings.reduce((s,b)=>s+(+b.total||0),0); },
+    get revenueThisMonth(){
+      const m=new Date().toISOString().slice(0,7);
+      return this.bookings.filter(b=>(b.checkin||'').startsWith(m)).reduce((s,b)=>s+(+b.total||0),0);
+    },
+    get avgRev(){ return this.bookings.length?Math.round(this.totalRev/this.bookings.length):0; },
+
+    statusColor(s){
+      const map={'已入住':'bg-green-100 text-green-800','已付訂金':'bg-blue-100 text-blue-800','已確認':'bg-yellow-100 text-yellow-800','待確認':'bg-gray-100','取消':'bg-red-100 text-red-800','提早退房':'bg-orange-100 text-orange-800','已完成':'bg-emerald-100 text-emerald-800'};
+      return map[s]||'bg-gray-100';
+    },
+    nextStatuses(s){ return TRANSITIONS[s]||[]; },
+    canTransition(from,to){ return (TRANSITIONS[from]||[]).includes(to); },
+
+    setStatus(b,status){
+      if(!status) return;
+      b.status=status;
+      if(status==='已入住') b.checkinTime=new Date().toLocaleString('zh-HK');
+      this.bookings=[...this.bookings];
+    },
+
+    extend(b){
+      const nd=prompt('新的退房日期 (YYYY-MM-DD)', b.checkout);
+      if(!nd || nd<=b.checkout) return alert('必須晚於原退房日');
+      b.checkout=nd;
+      const p=PRODUCTS.find(x=>x.name===b.product);
+      if(p){
+        const nights=Math.max(0,Math.round((new Date(nd)-new Date(b.checkin))/86400000));
+        const extra=Math.max(0,b.qty-1)*50*nights;
+        b.total=nights*p.price + extra;
+      }
+      this.bookings=[...this.bookings];
+      alert('已延期並更新總價');
+    },
+
+    addBooking(){
+      if(this.n.checkout && this.n.checkin && this.n.checkout <= this.n.checkin){
+        alert('退房日期必須晚於入住日期');
+        return;
+      }
+      const p=PRODUCTS.find(x=>x.name===this.n.product);
+      if(!p){ alert('請選擇房型'); return; }
+      const rooms=p.rooms;
+      // 檢查衝突
+      const conflict = this.bookings.some(b=>{
+        if(['取消','取消退訂金','取消退全數'].includes(b.status)) return false;
+        if(!b.checkin || !b.checkout) return false;
+        // 日期重疊
+        if(this.n.checkout <= b.checkin || this.n.checkin >= b.checkout) return false;
+        const bRooms = (b.rooms||'').split(',').map(r=>r.trim());
+        return rooms.some(r => bRooms.includes(r));
+      });
+      if(conflict){
+        alert('所選日期與房型有衝突（該物理房間已被其他訂單佔用），請選擇其他日期或房型。');
+        return;
+      }
+      // 自動計算費用
+      const nights = this.n.checkin && this.n.checkout ? Math.max(0, Math.round((new Date(this.n.checkout)-new Date(this.n.checkin))/86400000)) : 0;
+      const roomFee = nights * p.price;
+      const petExtra = Math.max(0, (this.n.qty||1)-1) * 50 * nights;
+      let weekendFee = 0;
+      if(nights > 0 && nights < 2){
+        const start = new Date(this.n.checkin);
+        const end = new Date(this.n.checkout);
+        for(let d = new Date(start); d < end; d.setDate(d.getDate()+1)){
+          if(d.getDay()===0 || d.getDay()===6){ weekendFee = 250; break; }
+        }
+      }
+      const total = roomFee + petExtra + weekendFee;
+
+      this.bookings.push({
+        id:'B'+Date.now().toString().slice(-8),
+        guest:this.n.guest, pet:this.n.pet, petType:this.n.petType,
+        product:this.n.product, rooms:rooms.join(','), qty:this.n.qty,
+        checkin:this.n.checkin, checkout:this.n.checkout,
+        total: total, status:'待確認',
+        food: this.n.food||'', foodFreq: this.n.foodFreq||'',
+        hay: this.n.hay||'', vegetables: this.n.vegetables||'',
+        special: this.n.special||'', extras: this.n.extras||[]
+      });
+      this.n={guest:'',pet:'',petType:'兔子',product:'',qty:1,checkin:'',checkout:'',total:0};
+      this.tab='預訂列表';
+    },
+
+    generateConfirmMsg(b){
+      const deposit=Math.round((b.total||0)*0.5);
+      const emoji=b.petType==='兔子'?'🐰':b.petType==='天竺鼠'?'🐷':'🐹';
+      const msg=`感謝您的預訂 ~ 
+👩🏻‍💻已確定資料如下:
+${emoji}${b.pet||''}${b.qty>1?'（共'+b.qty+'隻）':''}
+🛏️ ${b.product||''}（共${b.nights||''}晚）
+入住日期 *${b.checkin||''}*
+退房日期 *${b.checkout||''}*
+> 請按時出席，並預留約15-30分鐘時間辦理相關手續。
+
+🛋️入住流程🌟
+▶️我們將為小動物進行簡單身體檢查，確保身體狀況適合寄養。
+▶️家長需簽署【入住須知及寄養條款】及填寫【健康申報表】。
+▶️入住時需繳清房費尾數及所有額外收費。
+▶️⭕ 提交現金HK$1,000作備用金/按金（每隻）⭕
+
+💳 請透過此連結繳付50%住宿費訂金（HK$${deposit}），作保留房間之用。
+{付款連結}
+請完成付款後於 WhatsApp 回傳付款憑證，Thanks ~`;
+      this.showMsg(msg,'確認付款訊息');
+    },
+
+    generateReminderMsg(b){
+      const msg=`🏡入住提示 | 📆 仲有2日就要入住酒店拉~🥰
+日期:${b.checkin||''}
+***預留 15-30分鐘 時間辦理入住手續及帶備按金 💵1000現金(每位小動物)***
+🐾地址:觀塘｜成業街19-21號成業工業大廈13樓16室
+
+💡小提示
+1.可帶同小動物平日使用的小毛巾/屋仔，增加安全感💕
+2.請保留小動物2-3天的💩💩
+---------------------------------------------------------------------------------------------------
+*請提供滴蝨証明（如相片需顯示日期）*
+*如將自行準備用品，請再告知物品內容*`;
+      this.showMsg(msg,'入住前提醒');
+    },
+
+    showMsg(msg,title){
+      const win=window.open('','_blank','width=600,height=700');
+      if(!win){ alert('請允許彈出視窗'); return; }
+      win.document.write(`<html><head><title>${title}</title><style>body{font-family:system-ui;padding:20px;line-height:1.6;}pre{white-space:pre-wrap;background:#f8f9fa;padding:16px;border-radius:8px;}</style></head><body><h2>${title}</h2><p><button onclick="navigator.clipboard.writeText(document.querySelector('pre').innerText);alert('已複製！')">一鍵複製</button></p><pre>${msg.replace(/</g,'<')}</pre><p style="color:#666;font-size:13px;">請把 {付款連結} 替換成實際連結後發送。</p></body></html>`);
+    },
+
+    get monthLabel(){ return this.currentYear+'年 '+(this.currentMonth+1)+'月'; },
+    get monthDays(){
+      const days=[]; const last=new Date(this.currentYear,this.currentMonth+1,0).getDate();
+      const today=new Date().toISOString().slice(0,10);
+      for(let d=1;d<=last;d++){
+        const date=new Date(this.currentYear,this.currentMonth,d);
+        const dateStr=date.toISOString().slice(0,10);
+        days.push({day:d,date:dateStr,isToday:dateStr===today});
+      }
+      return days;
+    },
+    prevMonth(){ if(this.currentMonth===0){this.currentMonth=11;this.currentYear--;}else this.currentMonth--; },
+    nextMonth(){ if(this.currentMonth===11){this.currentMonth=0;this.currentYear++;}else this.currentMonth++; },
+
+    roomLabel(room){
+      if(room==='S1') return 'S1 (可組成SS1/SR1)';
+      if(room==='S2') return 'S2 (可組成SS1/SR1)';
+      if(room==='S3') return 'S3 (可組成SR1)';
+      return room;
+    },
+    getOccupantShort(room, date){
+      const b = this.bookings.find(b=>{
+        if(!b.checkin||!b.checkout||date<b.checkin||date>=b.checkout) return false;
+        if(['取消','取消退訂金','取消退全數'].includes(b.status)) return false;
+        return (b.rooms||'').split(',').map(r=>r.trim()).includes(room);
+      });
+      if(!b) return '';
+      const emoji = b.petType==='兔子'?'🐰':b.petType==='天竺鼠'?'🐷':'🐹';
+      const time = (b.checkinTime||'').split('-')[0] || '';
+      return emoji + (b.pet||'').slice(0,3) + (time ? ' '+time : '');
+    },
+    needsReminder(b){
+      if(['取消','已完成','已退房'].includes(b.status)) return false;
+      if(b.status==='已確認' && !b.depositDate) return true;
+      const days = b.checkin ? Math.round((new Date(b.checkin)-new Date())/86400000) : 99;
+      return days <= 3 && days >= 0 && b.status!=='已入住';
+    },
+    getStatus(room, date){
+      const b = this.bookings.find(b=>{
+        if(!b.checkin||!b.checkout||date<b.checkin||date>=b.checkout) return false;
+        if(['取消','取消退訂金','取消退全數'].includes(b.status)) return false;
+        return (b.rooms||'').split(',').map(r=>r.trim()).includes(room);
+      });
+      if(!b) return '空房';
+      if(b.status==='已入住') return '入住中';
+      if(['已確認','已付訂金','待確認'].includes(b.status)) return '保留中';
+      return '空房';
+    },
+    cellClass(room, date){
+      const s = this.getStatus(room, date);
+      if(s==='入住中') return 'bg-red-100';
+      if(s==='保留中') return 'bg-orange-100';
+      return 'bg-green-50';
+    },
+    isOccupied(room,date){
+      return this.bookings.some(b=>{
+        if(!b.checkin||!b.checkout||date<b.checkin||date>=b.checkout) return false;
+        if(['取消','取消退訂金','取消退全數'].includes(b.status)) return false;
+        const rooms=(b.rooms||'').split(',').map(r=>r.trim());
+        return rooms.includes(room);
+      });
+    },
+    getOccupant(room,date){
+      const b=this.bookings.find(b=>{
+        if(!b.checkin||!b.checkout||date<b.checkin||date>=b.checkout) return false;
+        if(['取消','取消退訂金','取消退全數'].includes(b.status)) return false;
+        return (b.rooms||'').split(',').map(r=>r.trim()).includes(room);
+      });
+      return b?(b.pet+' ('+b.guest+')'):'';
+    },
+
+    viewDetail(b){
+      const nights = b.checkin && b.checkout ? Math.max(0, Math.round((new Date(b.checkout)-new Date(b.checkin))/86400000)) : 0;
+      const roomFee = nights * (PRODUCTS.find(p=>p.name===b.product)?.price || 0);
+      const petExtra = Math.max(0, (b.qty||1)-1) * 50 * nights;
+      const deposit = Math.round((b.total||0)*0.5);
+      const balance = (b.total||0) - deposit;
+
+      const win = window.open('','_blank');
+      win.document.write(`
+        <html><head><title>預約詳細 - ${b.guest||''}</title>
+        <style>
+          body{font-family:'Noto Sans TC',system-ui;padding:30px;line-height:1.7;max-width:700px;margin:auto;}
+          h1{color:#4f46e5;border-bottom:2px solid #e0e7ff;padding-bottom:8px;}
+          .section{margin:16px 0;padding:12px;background:#f8fafc;border-radius:8px;}
+          .label{color:#6b7280;font-size:13px;}
+          .value{font-weight:600;}
+          table{width:100%;border-collapse:collapse;margin-top:8px;}
+          td{padding:6px 8px;border-bottom:1px solid #e5e7eb;}
+          .btn{background:#4f46e5;color:white;padding:10px 20px;border:none;border-radius:6px;cursor:pointer;margin-top:20px;}
+          @media print{.btn{display:none;}}
+        </style></head><body>
+        <h1>LittleLand 預約詳細紀錄</h1>
+        <div class="section">
+          <div><span class="label">客人：</span><span class="value">${b.guest||''}</span>　<span class="label">電話：</span><span class="value">${b.phone||'—'}</span></div>
+          <div><span class="label">寵物：</span><span class="value">${b.pet||''}（${b.petType||''}）</span>　<span class="label">數量：</span><span class="value">${b.qty||1} 隻</span></div>
+        </div>
+        <div class="section">
+          <div><span class="label">房型：</span><span class="value">${b.product||''}</span>　<span class="label">佔用房間：</span><span class="value">${b.rooms||'—'}</span></div>
+          <div><span class="label">入住：</span><span class="value">${b.checkin||''} ${b.checkinTime||''}</span></div>
+          <div><span class="label">退房：</span><span class="value">${b.checkout||''} ${b.checkoutTime||''}</span></div>
+          <div><span class="label">總晚數：</span><span class="value">${nights} 晚</span></div>
+        </div>
+        <div class="section">
+          <table>
+            <tr><td>房費總數</td><td>HK$${roomFee}</td></tr>
+            <tr><td>額外寵物費用</td><td>HK$${petExtra}</td></tr>
+            <tr><td>額外服務／附加費</td><td>HK$${(b.total||0)-roomFee-petExtra}</td></tr>
+            <tr><td><strong>總收費</strong></td><td><strong>HK$${b.total||0}</strong></td></tr>
+            <tr><td>房費50%訂金</td><td>HK$${deposit}</td></tr>
+            <tr><td>剩餘尾數</td><td>HK$${balance}</td></tr>
+          </table>
+        </div>
+        <div class="section">
+          <div><span class="label">主糧：</span><span class="value">${b.food||'—'}</span></div>
+          <div><span class="label">餵食次數：</span><span class="value">${b.foodFreq||'—'}</span></div>
+          <div><span class="label">牧草：</span><span class="value">${b.hay||'—'}</span></div>
+          <div><span class="label">新鮮蔬菜：</span><span class="value">${b.vegetables||'—'}</span></div>
+          <div><span class="label">特別要求：</span><span class="value">${b.special||'無'}</span></div>
+          <div><span class="label">額外服務：</span><span class="value">${(b.extras||[]).join('、')||'無'}</span></div>
+        </div>
+        <div class="section">
+          <div><span class="label">緊急聯絡：</span><span class="value">${b.emergency1||'—'}；${b.emergency2||'—'}</span></div>
+          <div><span class="label">訂單狀態：</span><span class="value">${b.status||''}</span></div>
+        </div>
+        <button class="btn" onclick="window.print()">列印／儲存為 PDF</button>
+        <p style="font-size:12px;color:#9ca3af;margin-top:20px;">LittleLand 小寵物酒店｜觀塘成業街19-21號成業工業大廈13樓16室｜WhatsApp 62886598</p>
+        </body></html>
+      `);
+    },
+
+    exportCSV(){
+      const h=['id','guest','pet','petType','product','rooms','qty','checkin','checkout','total','status'];
+      const csv=[h.join(','),...this.bookings.map(b=>h.map(k=>'"'+(b[k]||'')+'"').join(','))].join('\\n');
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(new Blob(['\\ufeff'+csv],{type:'text/csv'}));
+      a.download='littleland_bookings.csv'; a.click();
+    }
+  };
+}
+</script>
+</body>
+</html>
